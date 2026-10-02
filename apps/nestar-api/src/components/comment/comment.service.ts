@@ -11,6 +11,7 @@ import { CommentGroup, CommentStatus } from '../../libs/enums/comment.enum';
 import { Comment, Comments } from '../../libs/dto/comment/comment';
 import { CommentUpdate } from '../../libs/dto/comment/comment.update';
 import { lookupMember } from '../../libs/config';
+import { exec } from 'child_process';
 
 @Injectable()
 export class CommentService {
@@ -58,15 +59,17 @@ export class CommentService {
 	}
 	public async updateComment(memberId: Types.ObjectId, input: CommentUpdate): Promise<Comment> {
 		const { _id } = input;
-		const result = await this.commentModel.findByIdAndUpdate(
-			{
-				_id: _id,
-				memberId: memberId,
-				commentStatus: CommentStatus.ACTIVE,
-			},
-			input,
-			{ new: true },
-		);
+		const result = await this.commentModel
+			.findByIdAndUpdate(
+				{
+					_id: _id,
+					memberId: memberId,
+					commentStatus: CommentStatus.ACTIVE,
+				},
+				input,
+				{ new: true },
+			)
+			.exec();
 		if (!result) throw new InternalServerErrorException(Message.UPDATE_FAILED);
 		return result;
 	}
