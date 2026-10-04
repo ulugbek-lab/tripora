@@ -35,7 +35,7 @@ export class SocketGateway implements OnGatewayInit {
 		this.logger.verbose(`WebSocket Server Initialized & total:[${this.summaryClient}]`);
 	}
 
-	private async retrieveAuth(req: any): Promise<Member | null> {
+	private async retrieveAuth(req: any): Promise<Member | any> {
 		try {
 			const parseUrl = url.parse(req.url, true);
 			const { token } = parseUrl.query;
