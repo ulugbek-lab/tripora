@@ -16,9 +16,6 @@ import { TravelPackageStatus } from '../../libs/enums/travel-package.enum';
 import { ViewGroup } from '../../libs/enums/view.enum';
 import { ViewService } from '../view/view.service';
 import { TravelPackageUpdate } from '../../libs/dto/travel-package/travel-package.update';
-import { validateOrReject } from 'class-validator';
-import { plainToInstance } from 'class-transformer';
-import { availableTravelPackageSorts } from '../../libs/enums/travel-package.enum';
 import { lookupAuthMemberLiked, lookupMember, shapeIntoMongoObjectId } from '../../libs/config';
 import { LikeService } from '../like/like.service';
 import { LikeInput } from '../../libs/dto/like/like.input';
@@ -35,14 +32,27 @@ export class TravelPackageService {
 
 	/**=========================== (AGENT) createTravelPackage =============================== **/
 	public async createTravelPackage(memberId: Types.ObjectId, input: TravelPackageInput): Promise<TravelPackage> {
-		if (!memberId || !Types.ObjectId.isValid(String(memberId)))
-			throw new BadRequestException(Message.NOT_ALLOWED_REQUEST);
+		if (!memberId) throw new BadRequestException(Message.NOT_ALLOWED_REQUEST);
+		if (input.packageAvailableSlots > input.packageMaxTravellers) throw new BadRequestException(Message.BAD_REQUEST);
 		try {
-			await this.validatePackage(input);
-			const result = await this.travelPackageModel.create(this.packageFields(input, memberId));
+			const result = await this.travelPackageModel.create({
+				packageType: input.packageType,
+				packageCountry: input.packageCountry,
+				packageCity: input.packageCity,
+				packageTitle: input.packageTitle,
+				packagePrice: input.packagePrice,
+				packageCurrency: input.packageCurrency,
+				packageDurationDays: input.packageDurationDays,
+				packageMaxTravellers: input.packageMaxTravellers,
+				packageAvailableSlots: input.packageAvailableSlots,
+				packageImages: input.packageImages,
+				packageDesc: input.packageDesc,
+				packageStartDate: input.packageStartDate,
+				memberId,
+			});
 			await this.memberService.memberStatsEditor({ _id: result.memberId, targetKey: 'memberPackages', modifier: 1 });
 			return result;
-		} catch (err) {
+		} catch {
 			throw new BadRequestException(Message.CREATE_FAILED);
 		}
 	}
@@ -50,7 +60,46 @@ export class TravelPackageService {
 	/**=========================== (AGENT) updateTravelPackage =============================== **/
 	public async updateTravelPackage(memberId: Types.ObjectId, input: TravelPackageUpdate): Promise<TravelPackage> {
 		if (!memberId) throw new BadRequestException(Message.NOT_ALLOWED_REQUEST);
-		return this.updatePackage(input, memberId);
+		const search: T = { _id: input._id, memberId, packageStatus: { $ne: TravelPackageStatus.DELETE } };
+		const current = await this.travelPackageModel.findOne(search).lean<TravelPackage>().exec();
+		if (!current) throw new InternalServerErrorException(Message.UPDATE_FAILED);
+		const maxTravellers = input.packageMaxTravellers ?? current.packageMaxTravellers;
+		const availableSlots = input.packageAvailableSlots ?? current.packageAvailableSlots;
+		if (input.packageMaxTravellers === null || input.packageAvailableSlots === null || availableSlots > maxTravellers)
+			throw new BadRequestException(Message.BAD_REQUEST);
+		const status = input.packageStatus ?? current.packageStatus;
+		const changes: T = {
+			packageType: input.packageType,
+			packageCountry: input.packageCountry,
+			packageCity: input.packageCity,
+			packageTitle: input.packageTitle,
+			packagePrice: input.packagePrice,
+			packageCurrency: input.packageCurrency,
+			packageDurationDays: input.packageDurationDays,
+			packageMaxTravellers: input.packageMaxTravellers,
+			packageAvailableSlots: input.packageAvailableSlots,
+			packageImages: input.packageImages,
+			packageDesc: input.packageDesc,
+			packageStartDate: input.packageStartDate,
+			packageStatus: status,
+		};
+		const update: T = { $set: changes };
+		if (status === TravelPackageStatus.SOLD_OUT && status !== current.packageStatus) changes.soldOutAt = new Date();
+		if (status === TravelPackageStatus.ACTIVE) update.$unset = { soldOutAt: 1 };
+		if (status === TravelPackageStatus.DELETE) changes.deletedAt = new Date();
+		// Match the status/capacity we read so competing updates cannot double-count a transition or exceed capacity.
+		search.packageStatus = current.packageStatus;
+		search.packageMaxTravellers = current.packageMaxTravellers;
+		search.packageAvailableSlots = current.packageAvailableSlots;
+		const result = await this.travelPackageModel
+			.findOneAndUpdate(search, update, { new: true, runValidators: true })
+			.exec();
+		if (!result) throw new InternalServerErrorException(Message.UPDATE_FAILED);
+		const modifier =
+			Number(status === TravelPackageStatus.ACTIVE) - Number(current.packageStatus === TravelPackageStatus.ACTIVE);
+		if (modifier)
+			await this.memberService.memberStatsEditor({ _id: current.memberId, targetKey: 'memberPackages', modifier });
+		return result;
 	}
 
 	/**=========================== (AGENT) getAgentTravelPackages =============================== **/
@@ -64,7 +113,7 @@ export class TravelPackageService {
 			memberId: memberId,
 			packageStatus: packageStatus ?? { $ne: TravelPackageStatus.DELETE },
 		};
-		const sort = this.packageSort(input);
+		const sort: T = { [input?.sort ?? 'createdAt']: input?.direction ?? Direction.DESC };
 
 		const result = await this.travelPackageModel
 			.aggregate([
@@ -149,7 +198,7 @@ export class TravelPackageService {
 		input: TravelPackagesInquiry,
 	): Promise<TravelPackages> {
 		const match: T = { packageStatus: TravelPackageStatus.ACTIVE };
-		const sort = this.packageSort(input);
+		const sort: T = { [input?.sort ?? 'createdAt']: input?.direction ?? Direction.DESC };
 
 		this.shapeMatchQuery(match, input);
 
@@ -188,18 +237,13 @@ export class TravelPackageService {
 			startDateRange,
 			text,
 		} = input.search;
-		if (memberId) {
-			if (!Types.ObjectId.isValid(String(memberId))) throw new BadRequestException('Invalid member ID');
-			match.memberId = shapeIntoMongoObjectId(memberId);
-		}
+		if (memberId) match.memberId = shapeIntoMongoObjectId(memberId);
 		if (countryList?.length) match.packageCountry = { $in: countryList };
 		if (cityList?.length) match.packageCity = { $in: cityList };
 		if (typeList?.length) match.packageType = { $in: typeList };
-		// Currency selection is not defined in the approved inquiry contract.
-		if (priceRange || input.sort === 'packagePrice')
-			throw new BadRequestException('Price filtering and sorting require a currency-specific contract');
-		for (const range of [durationRange, maxTravellersRange, startDateRange]) {
-			if (range && range.start > range.end) throw new BadRequestException('Invalid package range');
+		if (priceRange) match.packagePrice = { $gte: priceRange.start, $lte: priceRange.end };
+		for (const range of [priceRange, durationRange, maxTravellersRange, startDateRange]) {
+			if (range && range.start > range.end) throw new BadRequestException(Message.BAD_REQUEST);
 		}
 		if (durationRange) match.packageDurationDays = { $gte: durationRange.start, $lte: durationRange.end };
 		if (maxTravellersRange)
@@ -211,15 +255,6 @@ export class TravelPackageService {
 				[key]: { $regex: new RegExp(escaped, 'i') },
 			}));
 		}
-	}
-	private packageSort(input: { sort?: string; direction?: Direction }): T {
-		if (input.direction !== undefined && !Object.values(Direction).includes(input.direction))
-			throw new BadRequestException('Invalid package sort direction');
-		if (input.sort && !availableTravelPackageSorts.includes(input.sort))
-			throw new BadRequestException('Invalid package sort');
-		if (input.sort === 'packagePrice')
-			throw new BadRequestException('Price sorting requires a currency-specific contract');
-		return { [input.sort ?? 'createdAt']: input.direction ?? Direction.DESC };
 	}
 
 	public async getFavoriteTravelPackages(memberId: Types.ObjectId, input: OrdinaryInquiry): Promise<TravelPackages> {
@@ -233,7 +268,7 @@ export class TravelPackageService {
 	public async getAllTravelPackagesByAdmin(input: AllTravelPackagesInquiry): Promise<TravelPackages> {
 		const { packageStatus, countryList } = input.search;
 		const match: T = {};
-		const sort = this.packageSort(input);
+		const sort: T = { [input?.sort ?? 'createdAt']: input?.direction ?? Direction.DESC };
 
 		if (packageStatus) match.packageStatus = packageStatus;
 		if (countryList?.length) match.packageCountry = { $in: countryList };
@@ -260,65 +295,45 @@ export class TravelPackageService {
 
 	/**=========================== (ADMIN) updateTravelPackageByAdmin =============================== **/
 	public async updateTravelPackageByAdmin(input: TravelPackageUpdate): Promise<TravelPackage> {
-		return this.updatePackage(input);
-	}
-	private packageFields(input: Partial<TravelPackageInput>, memberId?: Types.ObjectId): T {
-		const keys = [
-			'packageType',
-			'packageCountry',
-			'packageCity',
-			'packageTitle',
-			'packagePrice',
-			'packageCurrency',
-			'packageDurationDays',
-			'packageMaxTravellers',
-			'packageAvailableSlots',
-			'packageImages',
-			'packageDesc',
-			'packageStartDate',
-		];
-		const result: T = {};
-		for (const key of keys) if (input[key] !== undefined) result[key] = input[key];
-		if (memberId) result.memberId = memberId;
-		return result;
-	}
-	private async validatePackage(input: Partial<TravelPackageInput>): Promise<void> {
-		try {
-			await validateOrReject(plainToInstance(TravelPackageInput, input));
-		} catch {
-			throw new BadRequestException('Invalid travel package fields');
-		}
-		if (input.packageAvailableSlots! > input.packageMaxTravellers!)
-			throw new BadRequestException('Available slots cannot exceed maximum travellers');
-	}
-	private async updatePackage(input: TravelPackageUpdate, memberId?: Types.ObjectId): Promise<TravelPackage> {
-		if (!Types.ObjectId.isValid(String(input._id))) throw new BadRequestException('Invalid package ID');
 		const search: T = { _id: input._id, packageStatus: { $ne: TravelPackageStatus.DELETE } };
-		if (memberId) search.memberId = memberId;
 		const current = await this.travelPackageModel.findOne(search).lean<TravelPackage>().exec();
-		if (!current) throw new BadRequestException(Message.UPDATE_FAILED);
-		const changes = this.packageFields(input);
-		await this.validatePackage({ ...current, ...changes });
+		if (!current) throw new InternalServerErrorException(Message.UPDATE_FAILED);
+		const maxTravellers = input.packageMaxTravellers ?? current.packageMaxTravellers;
+		const availableSlots = input.packageAvailableSlots ?? current.packageAvailableSlots;
+		if (input.packageMaxTravellers === null || input.packageAvailableSlots === null || availableSlots > maxTravellers)
+			throw new BadRequestException(Message.BAD_REQUEST);
 		const status = input.packageStatus ?? current.packageStatus;
-		if (!Object.values(TravelPackageStatus).includes(status)) throw new BadRequestException('Invalid package status');
-		changes.packageStatus = status;
+		const changes: T = {
+			packageType: input.packageType,
+			packageCountry: input.packageCountry,
+			packageCity: input.packageCity,
+			packageTitle: input.packageTitle,
+			packagePrice: input.packagePrice,
+			packageCurrency: input.packageCurrency,
+			packageDurationDays: input.packageDurationDays,
+			packageMaxTravellers: input.packageMaxTravellers,
+			packageAvailableSlots: input.packageAvailableSlots,
+			packageImages: input.packageImages,
+			packageDesc: input.packageDesc,
+			packageStartDate: input.packageStartDate,
+			packageStatus: status,
+		};
 		const update: T = { $set: changes };
-		if (status === TravelPackageStatus.SOLD_OUT && current.packageStatus !== status) changes.soldOutAt = new Date();
+		if (status === TravelPackageStatus.SOLD_OUT && status !== current.packageStatus) changes.soldOutAt = new Date();
 		if (status === TravelPackageStatus.ACTIVE) update.$unset = { soldOutAt: 1 };
 		if (status === TravelPackageStatus.DELETE) changes.deletedAt = new Date();
-		search.updatedAt = current.updatedAt;
+		// Match the status/capacity we read so competing updates cannot double-count a transition or exceed capacity.
+		search.packageStatus = current.packageStatus;
+		search.packageMaxTravellers = current.packageMaxTravellers;
+		search.packageAvailableSlots = current.packageAvailableSlots;
 		const result = await this.travelPackageModel
 			.findOneAndUpdate(search, update, { new: true, runValidators: true })
 			.exec();
-		if (!result) throw new BadRequestException(Message.UPDATE_FAILED);
-		const packageCountChange =
+		if (!result) throw new InternalServerErrorException(Message.UPDATE_FAILED);
+		const modifier =
 			Number(status === TravelPackageStatus.ACTIVE) - Number(current.packageStatus === TravelPackageStatus.ACTIVE);
-		if (packageCountChange)
-			await this.memberService.memberStatsEditor({
-				_id: current.memberId,
-				targetKey: 'memberPackages',
-				modifier: packageCountChange,
-			});
+		if (modifier)
+			await this.memberService.memberStatsEditor({ _id: current.memberId, targetKey: 'memberPackages', modifier });
 		return result;
 	}
 
@@ -332,7 +347,6 @@ export class TravelPackageService {
 	}
 
 	public async assertAccessibleTravelPackage(packageId: Types.ObjectId): Promise<void> {
-		if (!Types.ObjectId.isValid(String(packageId))) throw new BadRequestException('Invalid package ID');
 		const target = await this.travelPackageModel
 			.findOne({ _id: packageId, packageStatus: TravelPackageStatus.ACTIVE })
 			.exec();
@@ -346,7 +360,7 @@ export class TravelPackageService {
 			!['packageViews', 'packageLikes', 'packageComments', 'packageRank'].includes(targetKey) ||
 			!Number.isFinite(modifier)
 		)
-			throw new BadRequestException('Invalid package statistic');
+			throw new BadRequestException(Message.BAD_REQUEST);
 		const filter: T = { _id };
 		if (modifier < 0) filter[targetKey] = { $gte: -modifier };
 		return this.travelPackageModel.findOneAndUpdate(filter, { $inc: { [targetKey]: modifier } }, { new: true }).exec();

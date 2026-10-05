@@ -1,3 +1,5 @@
+import { CommentsInquiry } from '../../libs/dto/comment/comment.input';
+import { TravelPackageUpdate } from '../../libs/dto/travel-package/travel-package.update';
 import { ExecutionContext } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { AuthService } from '../auth/auth.service';
@@ -198,7 +200,7 @@ describe('Phase 3 package behavior', () => {
 		const anonymous = f.model.aggregate.mock.calls[1][0][2].$facet as typeof facet;
 		expect(anonymous.list).toHaveLength(facet.list.length - 1);
 	});
-	it('rejects inverted ranges and invalid sort directions', async () => {
+	it('rejects inverted ranges and validates sort direction at the DTO boundary', async () => {
 		const f = fixture();
 		await expect(
 			f.service.getTravelPackages(null, {
@@ -206,10 +208,11 @@ describe('Phase 3 package behavior', () => {
 				limit: 5,
 				search: { durationRange: { start: 5, end: 1 } },
 			} as never),
-		).rejects.toThrow('range');
-		await expect(
-			f.service.getTravelPackages(null, { page: 1, limit: 5, direction: 7, search: {} } as never),
-		).rejects.toThrow('direction');
+		).rejects.toThrow('Bad Request');
+		const errors = await validate(
+			plainToInstance(TravelPackagesInquiry, { page: 1, limit: 5, direction: 7, search: {} }),
+		);
+		expect(errors.some((error) => error.property === 'direction')).toBe(true);
 	});
 	it('validates pagination before GraphQL service calls', async () => {
 		expect(await validate(plainToInstance(TravelPackagesInquiry, { page: 0, limit: 0, search: {} }))).not.toHaveLength(
@@ -492,5 +495,154 @@ describe('Phase 3 GraphQL guards and comment lifecycle', () => {
 		const model = { findOneAndDelete: jest.fn(async () => ({ _id: id })) };
 		await new CommentService(model as never, {} as never, {} as never, {} as never).removeCommentByAdmin(id);
 		expect(model.findOneAndDelete).toHaveBeenCalledWith({ _id: id, commentStatus: CommentStatus.DELETE });
+	});
+});
+
+describe('NESTAR-style refactor regressions', () => {
+	it('accepts a partial update DTO without the accidental z field', async () => {
+		expect(
+			await validate(plainToInstance(TravelPackageUpdate, { _id: id.toString(), packageTitle: 'Changed title' })),
+		).toHaveLength(0);
+	});
+	it('creates packages with the authenticated owner and increments memberPackages once', async () => {
+		const f = fixture();
+		await f.service.createTravelPackage(owner, valid);
+		expect(f.model.create).toHaveBeenCalledWith({ ...valid, memberId: owner });
+		expect(f.member.memberStatsEditor).toHaveBeenCalledWith({ _id: owner, targetKey: 'memberPackages', modifier: 1 });
+	});
+	it('rejects invalid capacity on creation', async () => {
+		const f = fixture();
+		await expect(f.service.createTravelPackage(owner, { ...valid, packageAvailableSlots: 11 })).rejects.toThrow();
+		expect(f.model.create).not.toHaveBeenCalled();
+	});
+	it('validates reduced capacity against unchanged available slots', async () => {
+		const f = fixture();
+		await expect(f.service.updateTravelPackage(owner, { _id: id, packageMaxTravellers: 4 })).rejects.toThrow();
+		expect(f.model.findOneAndUpdate).not.toHaveBeenCalled();
+	});
+	it.each([
+		[TravelPackageStatus.ACTIVE, TravelPackageStatus.SOLD_OUT, -1],
+		[TravelPackageStatus.SOLD_OUT, TravelPackageStatus.ACTIVE, 1],
+		[TravelPackageStatus.ACTIVE, TravelPackageStatus.DELETE, -1],
+		[TravelPackageStatus.ACTIVE, TravelPackageStatus.ACTIVE, 0],
+		[TravelPackageStatus.SOLD_OUT, TravelPackageStatus.SOLD_OUT, 0],
+	] as const)('admin transition %s to %s updates counts by %s', async (before, after, modifier) => {
+		const f = fixture(before);
+		await f.service.updateTravelPackageByAdmin({ _id: id, packageStatus: after });
+		const [filter, update] = f.model.findOneAndUpdate.mock.calls[0] as unknown as [
+			Record<string, unknown>,
+			{ $set: Record<string, unknown>; $unset?: Record<string, unknown> },
+		];
+		expect(filter.memberId).toBeUndefined();
+		expect(filter.packageStatus).toBe(before);
+		if (modifier)
+			expect(f.member.memberStatsEditor).toHaveBeenCalledWith({ _id: owner, targetKey: 'memberPackages', modifier });
+		else expect(f.member.memberStatsEditor).not.toHaveBeenCalled();
+		if (after === TravelPackageStatus.SOLD_OUT && before !== after) expect(update.$set.soldOutAt).toBeInstanceOf(Date);
+		if (after === TravelPackageStatus.ACTIVE) expect(update.$unset).toEqual({ soldOutAt: 1 });
+		if (after === TravelPackageStatus.DELETE) expect(update.$set.deletedAt).toBeInstanceOf(Date);
+	});
+	it('passes every approved search filter to the public match', async () => {
+		const f = fixture();
+		const start = new Date('2027-01-01');
+		const end = new Date('2027-02-01');
+		await f.service.getTravelPackages(null, {
+			page: 1,
+			limit: 10,
+			search: {
+				memberId: owner.toString(),
+				countryList: ['Korea'],
+				cityList: ['Seoul'],
+				typeList: [TravelPackageType.GROUP],
+				priceRange: { start: 100, end: 500 },
+				durationRange: { start: 1, end: 7 },
+				maxTravellersRange: { start: 5, end: 10 },
+				startDateRange: { start, end },
+			},
+		} as never);
+		expect(f.model.aggregate.mock.calls[0][0][0].$match).toEqual({
+			packageStatus: TravelPackageStatus.ACTIVE,
+			memberId: owner,
+			packageCountry: { $in: ['Korea'] },
+			packageCity: { $in: ['Seoul'] },
+			packageType: { $in: [TravelPackageType.GROUP] },
+			packagePrice: { $gte: 100, $lte: 500 },
+			packageDurationDays: { $gte: 1, $lte: 7 },
+			packageMaxTravellers: { $gte: 5, $lte: 10 },
+			packageStartDate: { $gte: start, $lte: end },
+		});
+	});
+	it('delegates favorites and history without changing member identity', async () => {
+		const f = fixture();
+		const input = { page: 2, limit: 5 };
+		const result = { list: [], metaCounter: [] };
+		const like = { getFavoriteTravelPackages: jest.fn(async () => result) };
+		const view = { getVisitedTravelPackages: jest.fn(async () => result) };
+		const service = new TravelPackageService(f.model as never, f.member as never, view as never, like as never);
+		expect(await service.getFavoriteTravelPackages(viewer, input)).toEqual(result);
+		expect(await service.getVisitedTravelPackages(viewer, input)).toEqual(result);
+		expect(like.getFavoriteTravelPackages).toHaveBeenCalledWith(viewer, input);
+		expect(view.getVisitedTravelPackages).toHaveBeenCalledWith(viewer, input);
+	});
+	it('concurrent status transitions cannot double-decrement memberPackages', async () => {
+		const f = fixture();
+		f.model.findOneAndUpdate.mockImplementation((filter, update) => ({
+			exec: async () => {
+				if (filter.packageStatus !== f.current.packageStatus) return null;
+				f.current.packageStatus = update.$set.packageStatus;
+				return { ...f.current };
+			},
+		}));
+		const results = await Promise.allSettled([
+			f.service.updateTravelPackage(owner, { _id: id, packageStatus: TravelPackageStatus.SOLD_OUT }),
+			f.service.updateTravelPackage(owner, { _id: id, packageStatus: TravelPackageStatus.SOLD_OUT }),
+		]);
+		expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+		expect(f.member.memberStatsEditor).toHaveBeenCalledTimes(1);
+	});
+	it('concurrent capacity updates cannot combine into an invalid package', async () => {
+		const f = fixture();
+		f.model.findOneAndUpdate.mockImplementation((filter, update) => ({
+			exec: async () => {
+				if (
+					filter.packageMaxTravellers !== f.current.packageMaxTravellers ||
+					filter.packageAvailableSlots !== f.current.packageAvailableSlots
+				)
+					return null;
+				if (update.$set.packageMaxTravellers !== undefined)
+					f.current.packageMaxTravellers = update.$set.packageMaxTravellers;
+				if (update.$set.packageAvailableSlots !== undefined)
+					f.current.packageAvailableSlots = update.$set.packageAvailableSlots;
+				return { ...f.current };
+			},
+		}));
+		const results = await Promise.allSettled([
+			f.service.updateTravelPackage(owner, { _id: id, packageMaxTravellers: 6 }),
+			f.service.updateTravelPackage(owner, { _id: id, packageAvailableSlots: 9 }),
+		]);
+		expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+		expect(f.current.packageAvailableSlots).toBeLessThanOrEqual(f.current.packageMaxTravellers);
+	});
+});
+
+describe('Nestar comment sort validation boundary', () => {
+	it.each(['createdAt', 'updatedAt'])('accepts %s through the existing inquiry DTO', async (sort) => {
+		const input = plainToInstance(CommentsInquiry, {
+			page: 1,
+			limit: 5,
+			sort,
+			search: { commentRefId: id.toString() },
+		});
+		expect(await validate(input)).toHaveLength(0);
+	});
+	it('rejects unknown sort fields through the existing inquiry DTO', async () => {
+		const input = plainToInstance(CommentsInquiry, {
+			page: 1,
+			limit: 5,
+			sort: 'unexpectedField',
+			search: { commentRefId: id.toString() },
+		});
+		const errors = await validate(input);
+		expect(errors.some((error) => error.property === 'sort')).toBe(true);
 	});
 });

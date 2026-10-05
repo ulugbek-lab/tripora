@@ -90,8 +90,6 @@ export class CommentService {
 	public async getComments(memberId: Types.ObjectId, input: CommentsInquiry): Promise<Comments> {
 		const { commentRefId } = input.search;
 		const match: T = { commentRefId: commentRefId, commentStatus: CommentStatus.ACTIVE };
-		if (input.sort && !['createdAt', 'updatedAt'].includes(input.sort))
-			throw new BadRequestException('Invalid comment sort');
 		const sort: T = { [input?.sort ?? 'createdAt']: input?.direction ?? Direction.DESC };
 
 		const result: Comments[] = await this.commentModel

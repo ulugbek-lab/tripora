@@ -8,7 +8,7 @@ import { validate } from 'class-validator';
 import { plainToInstance } from 'class-transformer';
 import { model, Types } from 'mongoose';
 import TravelPackageSchema from '../../schemas/TravelPackage.model';
-import { TravelPackageInput } from '../../libs/dto/travel-package/travel-package.input';
+import { TravelPackageInput, TravelPackagesInquiry } from '../../libs/dto/travel-package/travel-package.input';
 import { TravelPackageStatus, TravelPackageType } from '../../libs/enums/travel-package.enum';
 import { TravelPackageResolver } from './travel-package.resolver';
 import { TravelPackageService } from './travel-package.service';
@@ -98,7 +98,7 @@ describe('TravelPackage service boundaries', () => {
 	});
 	it('filters updates by authenticated owner and rejects capacity violations', async () => {
 		await expect(service.updateTravelPackage(owner, { _id: id, packageAvailableSlots: 11 })).rejects.toThrow(
-			'Available slots',
+			'Bad Request',
 		);
 		expect(query.findOne.mock.calls[0][0].memberId).toEqual(owner);
 		expect(query.findOneAndUpdate).not.toHaveBeenCalled();
@@ -148,7 +148,8 @@ describe('TravelPackage service boundaries', () => {
 		await expect(
 			service.updateTravelPackage(owner, { _id: id, packageStatus: TravelPackageStatus.DELETE }),
 		).rejects.toThrow();
-		expect(query.findOneAndUpdate.mock.calls[0][0].updatedAt).toEqual(current.updatedAt);
+		expect(query.findOneAndUpdate.mock.calls[0][0].packageStatus).toEqual(current.packageStatus);
+		expect(query.findOneAndUpdate.mock.calls[0][0].updatedAt).toBeUndefined();
 		expect(stats).not.toHaveBeenCalled();
 	});
 	it('returns an empty public page safely for anonymous callers', async () => {
@@ -159,21 +160,24 @@ describe('TravelPackage service boundaries', () => {
 		const pipeline = query.aggregate.mock.calls[0][0];
 		expect(pipeline[0].$match.packageStatus).toBe(TravelPackageStatus.ACTIVE);
 	});
-	it('escapes text and refuses unknown or mixed-currency price sorts', async () => {
-		await service.getTravelPackages(null, { page: 1, limit: 10, search: { text: 'a.b' } as never });
-		expect(query.aggregate.mock.calls[0][0][0].$match.$or[0].packageTitle.$regex.source).toBe('a\\.b');
-		await expect(
-			service.getTravelPackages(null, {
-				page: 1,
-				limit: 10,
-				sort: 'unknown',
-				direction: Direction.DESC,
-				search: {} as never,
-			}),
-		).rejects.toThrow('Invalid package sort');
-		await expect(
-			service.getTravelPackages(null, { page: 1, limit: 10, sort: 'packagePrice', search: {} as never }),
-		).rejects.toThrow('currency');
+	it('escapes text and allows price filtering/sorting', async () => {
+		await service.getTravelPackages(null, {
+			page: 1,
+			limit: 10,
+			sort: 'packagePrice',
+			direction: Direction.ASC,
+			search: { text: 'a.b', priceRange: { start: 100, end: 500 } } as never,
+		});
+		const pipeline = query.aggregate.mock.calls[0][0];
+		expect(pipeline[0].$match.$or[0].packageTitle.$regex.source).toBe('a\\.b');
+		expect(pipeline[0].$match.packagePrice).toEqual({ $gte: 100, $lte: 500 });
+		expect(pipeline[1].$sort).toEqual({ packagePrice: Direction.ASC });
+	});
+	it('keeps the sort allowlist at the DTO boundary', async () => {
+		const errors = await validate(
+			plainToInstance(TravelPackagesInquiry, { page: 1, limit: 10, sort: 'unknown', search: {} }),
+		);
+		expect(errors.some((error) => error.property === 'sort')).toBe(true);
 	});
 });
 
