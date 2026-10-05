@@ -1,3 +1,4 @@
+import { TravelPackageStatus } from '../../libs/enums/travel-package.enum';
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Like, MeLiked } from '../../libs/dto/like/like';
@@ -15,17 +16,18 @@ export class LikeService {
 	constructor(@InjectModel('Like') private readonly likeModel: Model<Like>) {}
 
 	public async toggleLike(input: LikeInput): Promise<number> {
-		const search: T = { memberId: input.memberId, likeRefId: input.likeRefId };
+		const search: T = { memberId: input.memberId, likeRefId: input.likeRefId, likeGroup: input.likeGroup };
 		const exist = await this.likeModel.findOne(search).exec();
 		let modifier = 1;
 
 		if (exist) {
-			await this.likeModel.findOneAndDelete(search).exec();
-			modifier = -1;
+			const removed = await this.likeModel.findOneAndDelete(search).exec();
+			modifier = removed ? -1 : 0;
 		} else {
 			try {
 				await this.likeModel.create(input);
 			} catch (err) {
+				if (err instanceof Error && 'code' in err && err.code === 11000) return 0;
 				console.log('Error, Service.model:', err);
 				throw new BadRequestException(Message.CREATE_FAILED);
 			}
@@ -35,8 +37,8 @@ export class LikeService {
 	}
 
 	public async checkLikeExistance(input: LikeInput): Promise<MeLiked[]> {
-		const { memberId, likeRefId } = input;
-		const result = await this.likeModel.findOne({ memberId: memberId, likeRefId: likeRefId }).exec();
+		const { memberId, likeRefId, likeGroup } = input;
+		const result = await this.likeModel.findOne({ memberId, likeRefId, likeGroup }).exec();
 		return result ? [{ memberId: memberId, likeRefId: likeRefId, myFavorite: true }] : [];
 	}
 
@@ -57,13 +59,14 @@ export class LikeService {
 					},
 				},
 				{ $unwind: '$favoriteTravelPackage' },
+				{ $match: { 'favoriteTravelPackage.packageStatus': TravelPackageStatus.ACTIVE } },
 				{
 					$facet: {
 						list: [
 							{ $skip: (page - 1) * limit },
 							{ $limit: limit },
 							lookupFavoriteTravelPackage,
-							{ $unwind: '$favoriteTravelPackage.memberData' },
+							{ $unwind: { path: '$favoriteTravelPackage.memberData', preserveNullAndEmptyArrays: true } },
 						],
 						metaCounter: [{ $count: 'total' }],
 					},
@@ -72,8 +75,9 @@ export class LikeService {
 			.exec();
 
 		console.log('data', data);
-		const result: TravelPackages = { list: [], metaCounter: data[0].metaCounter };
-		result.list = data[0].list.map((ele) => ele.favoriteTravelPackage);
+		const pageData = data[0] ?? { list: [], metaCounter: [] };
+		const result: TravelPackages = { list: [], metaCounter: pageData.metaCounter };
+		result.list = pageData.list.map((ele) => ele.favoriteTravelPackage);
 
 		return result;
 	}

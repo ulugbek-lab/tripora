@@ -37,7 +37,7 @@ export class TravelPackageUpdate {
 	@IsOptional() @IsInt() @Min(1) @Field(() => Int, { nullable: true }) packageMaxTravellers?: number;
 	@IsOptional() @IsInt() @Min(0) @Field(() => Int, { nullable: true }) packageAvailableSlots?: number;
 	@IsOptional()
-	@IsArray()
+	@IsArray()z
 	@ArrayMinSize(1)
 	@IsString({ each: true })
 	@IsNotEmpty({ each: true })

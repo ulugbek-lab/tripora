@@ -1,12 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Member, Members } from 'apps/tripora-api/src/libs/dto/member/member';
+import { Member } from 'apps/tripora-api/src/libs/dto/member/member';
 import { TravelPackage } from 'apps/tripora-api/src/libs/dto/travel-package/travel-package';
 import { MemberStatus, MemberType } from 'apps/tripora-api/src/libs/enums/member.enum';
 import { TravelPackageStatus } from 'apps/tripora-api/src/libs/enums/travel-package.enum';
-import { T } from 'apps/tripora-api/src/libs/types/common';
 import { Model } from 'mongoose';
-import { elementAt, retry } from 'rxjs';
 
 @Injectable()
 export class BatchService {
@@ -47,12 +45,12 @@ export class BatchService {
 			})
 			.exec();
 
-		const propmisedList = travelPackages.map(async (ele: TravelPackage) => {
+		const promisedList = travelPackages.map(async (ele: TravelPackage) => {
 			const { _id, packageLikes, packageViews } = ele;
 			const rank = packageLikes * 2 + packageViews * 1;
 			return await this.travelPackageModel.findByIdAndUpdate(_id, { packageRank: rank });
 		});
-		await Promise.all(propmisedList);
+		await Promise.all(promisedList);
 	}
 
 	public async batchTopAgents(): Promise<void> {
@@ -66,7 +64,7 @@ export class BatchService {
 
 		const promisedList = agents.map(async (ele: Member) => {
 			const { _id, memberPackages, memberLikes, memberArticles, memberViews } = ele;
-			const rank = (memberPackages as any) * 5 + memberArticles * 3 + memberLikes * 2 + memberViews * 1;
+			const rank = (memberPackages ?? 0) * 5 + memberArticles * 3 + memberLikes * 2 + memberViews * 1;
 			return await this.memberModel.findByIdAndUpdate(_id, { memberRank: rank });
 		});
 		await Promise.all(promisedList);

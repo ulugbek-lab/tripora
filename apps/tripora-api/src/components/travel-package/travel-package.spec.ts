@@ -196,9 +196,22 @@ describe('TravelPackage history direct references', () => {
 				: { memberId, viewGroup: ViewGroup.TRAVEL_PACKAGE },
 		);
 		expect(pipeline[2].$lookup).toMatchObject({ from: 'travelPackages', as: alias });
-		const facet = pipeline[4].$facet as { list: { $lookup?: Record<string, unknown> }[] };
+		expect(pipeline[4].$match).toEqual({ [`${alias}.packageStatus`]: TravelPackageStatus.ACTIVE });
+		const facet = pipeline[5].$facet as { list: { $lookup?: Record<string, unknown> }[] };
 		const list = facet.list;
 		expect(list[2].$lookup).toMatchObject({ localField: `${alias}.memberId`, as: `${alias}.memberData` });
 		expect(result).toEqual({ list: [travelPackage], metaCounter: [{ total: 1 }] });
+	});
+});
+
+describe('TravelPackage history empty results', () => {
+	it.each(['favorite', 'visited'] as const)('returns an empty %s page', async (kind) => {
+		const aggregate = jest.fn(() => ({ exec: async () => [] }));
+		const memberId = new Types.ObjectId();
+		const result =
+			kind === 'favorite'
+				? await new LikeService({ aggregate } as never).getFavoriteTravelPackages(memberId, { page: 1, limit: 10 })
+				: await new ViewService({ aggregate } as never).getVisitedTravelPackages(memberId, { page: 1, limit: 10 });
+		expect(result).toEqual({ list: [], metaCounter: [] });
 	});
 });

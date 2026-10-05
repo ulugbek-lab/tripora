@@ -99,7 +99,7 @@ export class MemberService {
 		return targetMember;
 	}
 
-	private async checkSubscription(followerId: Types.ObjectId, followingId: Types.ObjectId): Promise<MeFollowed[]> {
+	public async checkSubscription(followerId: Types.ObjectId, followingId: Types.ObjectId): Promise<MeFollowed[]> {
 		const result = await this.followModel.findOne({ followingId: followingId, followerId: followerId }).exec();
 
 		return result ? [{ followerId: followerId, followingId: followingId, myFollowing: true }] : [];
@@ -186,6 +186,25 @@ export class MemberService {
 	public async memberStatsEditor(input: StatisticModifier): Promise<Member | null> {
 		console.log('executed stats');
 		const { _id, targetKey, modifier } = input;
-		return await this.memberModel.findByIdAndUpdate(_id, { $inc: { [targetKey]: modifier } }, { new: true }).exec();
+		if (
+			![
+				'memberPackages',
+				'memberArticles',
+				'memberFollowers',
+				'memberFollowings',
+				'memberLikes',
+				'memberViews',
+				'memberComments',
+				'memberRank',
+				'memberPoints',
+				'memberWarnings',
+				'memberBlocks',
+			].includes(targetKey) ||
+			!Number.isFinite(modifier)
+		)
+			throw new BadRequestException('Invalid member statistic');
+		const filter: T = { _id };
+		if (modifier < 0) filter[targetKey] = { $gte: -modifier };
+		return await this.memberModel.findOneAndUpdate(filter, { $inc: { [targetKey]: modifier } }, { new: true }).exec();
 	}
 }

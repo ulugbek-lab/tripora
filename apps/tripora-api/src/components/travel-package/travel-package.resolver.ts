@@ -24,6 +24,7 @@ import { AuthGuard } from '../auth/guards/auth.guard';
 export class TravelPackageResolver {
 	constructor(private readonly travelPackageService: TravelPackageService) {}
 
+	//AGENT
 	@Roles(MemberType.AGENT)
 	@UseGuards(RolesGuard)
 	@Mutation(() => TravelPackage)
@@ -46,6 +47,7 @@ export class TravelPackageResolver {
 		return await this.travelPackageService.updateTravelPackage(memberId, input);
 	}
 
+	//AGENT
 	@Roles(MemberType.AGENT)
 	@UseGuards(RolesGuard)
 	@Query((returns) => TravelPackages)
@@ -57,7 +59,6 @@ export class TravelPackageResolver {
 	}
 
 	//Like
-
 	@UseGuards(AuthGuard)
 	@Mutation(() => TravelPackage)
 	public async likeTargetTravelPackage(

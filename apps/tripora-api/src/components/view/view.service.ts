@@ -1,3 +1,4 @@
+import { TravelPackageStatus } from '../../libs/enums/travel-package.enum';
 import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -17,7 +18,12 @@ export class ViewService {
 		const viewExist = await this.checkViewExistance(input);
 		if (!viewExist) {
 			console.log('New View insertedddd');
-			return await this.viewModel.create(input);
+			try {
+				return await this.viewModel.create(input);
+			} catch (error) {
+				if (error instanceof Error && 'code' in error && error.code === 11000) return null;
+				throw error;
+			}
 		} else return null;
 	}
 
@@ -44,13 +50,14 @@ export class ViewService {
 					},
 				},
 				{ $unwind: '$visitedTravelPackage' },
+				{ $match: { 'visitedTravelPackage.packageStatus': TravelPackageStatus.ACTIVE } },
 				{
 					$facet: {
 						list: [
 							{ $skip: (page - 1) * limit },
 							{ $limit: limit },
 							lookupVisitedTravelPackage,
-							{ $unwind: '$visitedTravelPackage.memberData' },
+							{ $unwind: { path: '$visitedTravelPackage.memberData', preserveNullAndEmptyArrays: true } },
 						],
 						metaCounter: [{ $count: 'total' }],
 					},
@@ -58,8 +65,9 @@ export class ViewService {
 			])
 			.exec();
 		console.log('data without map', data);
-		const result: TravelPackages = { list: [], metaCounter: data[0].metaCounter };
-		result.list = data[0].list.map((ele) => ele.visitedTravelPackage);
+		const pageData = data[0] ?? { list: [], metaCounter: [] };
+		const result: TravelPackages = { list: [], metaCounter: pageData.metaCounter };
+		result.list = pageData.list.map((ele) => ele.visitedTravelPackage);
 		console.log('result.list', result);
 		return result;
 	}

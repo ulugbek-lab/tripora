@@ -22,6 +22,9 @@ export class CommentService {
 	) {}
 	public async createComment(memberId: Types.ObjectId, input: CommentInput): Promise<Comment> {
 		input.memberId = memberId;
+		if (input.commentGroup === CommentGroup.TRAVEL_PACKAGE) {
+			await this.travelPackageService.assertAccessibleTravelPackage(input.commentRefId);
+		}
 
 		let result: Comment | null;
 		try {
@@ -59,22 +62,36 @@ export class CommentService {
 	public async updateComment(memberId: Types.ObjectId, input: CommentUpdate): Promise<Comment> {
 		const { _id } = input;
 		const result = await this.commentModel
-			.findByIdAndUpdate(
+			.findOneAndUpdate(
 				{
 					_id: _id,
 					memberId: memberId,
 					commentStatus: CommentStatus.ACTIVE,
 				},
-				input,
-				{ new: true },
+				{
+					$set: {
+						...(input.commentContent !== undefined ? { commentContent: input.commentContent } : {}),
+						...(input.commentStatus !== undefined ? { commentStatus: input.commentStatus } : {}),
+					},
+				},
+				{ new: true, runValidators: true },
 			)
 			.exec();
 		if (!result) throw new InternalServerErrorException(Message.UPDATE_FAILED);
+		if (result.commentGroup === CommentGroup.TRAVEL_PACKAGE && input.commentStatus === CommentStatus.DELETE) {
+			await this.travelPackageService.travelPackageStatsEditor({
+				_id: result.commentRefId,
+				targetKey: 'packageComments',
+				modifier: -1,
+			});
+		}
 		return result;
 	}
 	public async getComments(memberId: Types.ObjectId, input: CommentsInquiry): Promise<Comments> {
 		const { commentRefId } = input.search;
 		const match: T = { commentRefId: commentRefId, commentStatus: CommentStatus.ACTIVE };
+		if (input.sort && !['createdAt', 'updatedAt'].includes(input.sort))
+			throw new BadRequestException('Invalid comment sort');
 		const sort: T = { [input?.sort ?? 'createdAt']: input?.direction ?? Direction.DESC };
 
 		const result: Comments[] = await this.commentModel
@@ -88,20 +105,18 @@ export class CommentService {
 							{ $limit: input.limit },
 							//meLiked
 							lookupMember,
-							{ $unwind: '$memberData' },
+							{ $unwind: { path: '$memberData', preserveNullAndEmptyArrays: true } },
 						],
 						metaCounter: [{ $count: 'total' }],
 					},
 				},
 			])
 			.exec();
-		if (!result.length) throw new InternalServerErrorException(Message.NO_DATA_FOUND);
-
-		return result[0];
+		return result[0] ?? { list: [], metaCounter: [] };
 	}
 
 	public async removeCommentByAdmin(input: Types.ObjectId): Promise<Comment> {
-		const result = await this.commentModel.findByIdAndDelete(input);
+		const result = await this.commentModel.findOneAndDelete({ _id: input, commentStatus: CommentStatus.DELETE });
 		if (!result) throw new InternalServerErrorException(Message.REMOVE_FAILED);
 		return result;
 	}

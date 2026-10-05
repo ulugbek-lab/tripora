@@ -76,7 +76,7 @@ export class TravelPackageService {
 							{ $skip: (input.page - 1) * input.limit },
 							{ $limit: input.limit },
 							lookupMember,
-							{ $unwind: '$memberData' },
+							{ $unwind: { path: '$memberData', preserveNullAndEmptyArrays: true } },
 						],
 						metaCounter: [{ $count: 'total' }],
 					},
@@ -135,6 +135,11 @@ export class TravelPackageService {
 		}
 
 		targetTravelPackage.memberData = await this.memberService.getMember(null, targetTravelPackage.memberId);
+		if (memberId)
+			targetTravelPackage.memberData.meFollowed = await this.memberService.checkSubscription(
+				memberId,
+				targetTravelPackage.memberId,
+			);
 		return targetTravelPackage;
 	}
 
@@ -160,7 +165,7 @@ export class TravelPackageService {
 							...(memberId ? [lookupAuthMemberLiked(memberId)] : []),
 							//meLiked
 							lookupMember,
-							{ $unwind: '$memberData' },
+							{ $unwind: { path: '$memberData', preserveNullAndEmptyArrays: true } },
 						],
 						metaCounter: [{ $count: 'total' }],
 					},
@@ -193,6 +198,9 @@ export class TravelPackageService {
 		// Currency selection is not defined in the approved inquiry contract.
 		if (priceRange || input.sort === 'packagePrice')
 			throw new BadRequestException('Price filtering and sorting require a currency-specific contract');
+		for (const range of [durationRange, maxTravellersRange, startDateRange]) {
+			if (range && range.start > range.end) throw new BadRequestException('Invalid package range');
+		}
 		if (durationRange) match.packageDurationDays = { $gte: durationRange.start, $lte: durationRange.end };
 		if (maxTravellersRange)
 			match.packageMaxTravellers = { $gte: maxTravellersRange.start, $lte: maxTravellersRange.end };
@@ -205,6 +213,8 @@ export class TravelPackageService {
 		}
 	}
 	private packageSort(input: { sort?: string; direction?: Direction }): T {
+		if (input.direction !== undefined && !Object.values(Direction).includes(input.direction))
+			throw new BadRequestException('Invalid package sort direction');
 		if (input.sort && !availableTravelPackageSorts.includes(input.sort))
 			throw new BadRequestException('Invalid package sort');
 		if (input.sort === 'packagePrice')
@@ -238,7 +248,7 @@ export class TravelPackageService {
 							{ $skip: (input.page - 1) * input.limit },
 							{ $limit: input.limit },
 							lookupMember, // memberData: [memberdataValue]
-							{ $unwind: '$memberData' }, //memberData: memberdataValue
+							{ $unwind: { path: '$memberData', preserveNullAndEmptyArrays: true } }, //memberData: memberdataValue
 						],
 						metaCounter: [{ $count: 'total' }],
 					},
@@ -301,12 +311,13 @@ export class TravelPackageService {
 			.findOneAndUpdate(search, update, { new: true, runValidators: true })
 			.exec();
 		if (!result) throw new BadRequestException(Message.UPDATE_FAILED);
-		// Preserve existing member counter semantics.
-		if (current.packageStatus === TravelPackageStatus.ACTIVE && status !== current.packageStatus)
+		const packageCountChange =
+			Number(status === TravelPackageStatus.ACTIVE) - Number(current.packageStatus === TravelPackageStatus.ACTIVE);
+		if (packageCountChange)
 			await this.memberService.memberStatsEditor({
 				_id: current.memberId,
 				targetKey: 'memberPackages',
-				modifier: -1,
+				modifier: packageCountChange,
 			});
 		return result;
 	}
@@ -318,6 +329,14 @@ export class TravelPackageService {
 		if (!result) throw new InternalServerErrorException(Message.REMOVE_FAILED);
 
 		return result;
+	}
+
+	public async assertAccessibleTravelPackage(packageId: Types.ObjectId): Promise<void> {
+		if (!Types.ObjectId.isValid(String(packageId))) throw new BadRequestException('Invalid package ID');
+		const target = await this.travelPackageModel
+			.findOne({ _id: packageId, packageStatus: TravelPackageStatus.ACTIVE })
+			.exec();
+		if (!target) throw new BadRequestException(Message.NO_DATA_FOUND);
 	}
 
 	/**=========================== travelPackageStatsEditor =============================== **/
