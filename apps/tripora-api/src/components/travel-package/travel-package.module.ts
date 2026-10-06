@@ -1,3 +1,4 @@
+import { RateLimitModule } from '../../libs/rate-limit';
 import { Module } from '@nestjs/common';
 import { TravelPackageResolver } from './travel-package.resolver';
 import { TravelPackageService } from './travel-package.service';
@@ -10,6 +11,7 @@ import { LikeModule } from '../like/like.module';
 
 @Module({
 	imports: [
+		RateLimitModule,
 		MongooseModule.forFeature([{ name: 'TravelPackage', schema: TravelPackageSchema }]),
 		AuthModule,
 		ViewModule,

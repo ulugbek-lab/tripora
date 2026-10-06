@@ -1,3 +1,4 @@
+import { OperationRateLimitGuard } from '../../libs/rate-limit';
 import { Args, Mutation, Query, Resolver } from '@nestjs/graphql';
 import { TravelPackageService } from './travel-package.service';
 import { TravelPackages, TravelPackage } from '../../libs/dto/travel-package/travel-package';
@@ -70,7 +71,7 @@ export class TravelPackageResolver {
 	}
 
 	//ALL
-	@UseGuards(WithoutGuard)
+	@UseGuards(OperationRateLimitGuard, WithoutGuard)
 	@Query((returns) => TravelPackage)
 	public async getTravelPackage(
 		@Args('packageId') input: string,
@@ -80,7 +81,7 @@ export class TravelPackageResolver {
 		return await this.travelPackageService.getTravelPackage(memberId, packageId);
 	}
 
-	@UseGuards(WithoutGuard)
+	@UseGuards(OperationRateLimitGuard, WithoutGuard)
 	@Query((returns) => TravelPackages)
 	public async getTravelPackages(
 		@Args('input') input: TravelPackagesInquiry,

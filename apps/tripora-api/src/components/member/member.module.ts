@@ -1,3 +1,4 @@
+import { RateLimitModule } from '../../libs/rate-limit';
 import { Module } from '@nestjs/common';
 import { MemberResolver } from './member.resolver';
 import { MemberService } from './member.service';
@@ -10,6 +11,7 @@ import FollowSchema from '../../schemas/Follow.model';
 
 @Module({
 	imports: [
+		RateLimitModule,
 		MongooseModule.forFeature([{ name: 'Member', schema: MemberSchema }]),
 		MongooseModule.forFeature([{ name: 'Follow', schema: FollowSchema }]),
 		AuthModule,

@@ -1,3 +1,4 @@
+import { OperationRateLimitGuard } from '../../libs/rate-limit';
 import { Mutation, Resolver, Query, Args } from '@nestjs/graphql';
 import { MemberService } from './member.service';
 import { AgentsInquiry, LoginInput, MemberInput, MembersInquiry } from '../../libs/dto/member/member.input';
@@ -21,11 +22,13 @@ import { Message } from '../../libs/enums/common.enum';
 export class MemberResolver {
 	constructor(private readonly memberService: MemberService) {}
 
+	@UseGuards(OperationRateLimitGuard)
 	@Mutation(() => Member)
 	public async signup(@Args('input') input: MemberInput): Promise<Member> {
 		console.log('Mutation: signup');
 		return await this.memberService.signup(input);
 	}
+	@UseGuards(OperationRateLimitGuard)
 	@Mutation(() => Member)
 	public async login(@Args('input') input: LoginInput): Promise<Member> {
 		console.log('Mutation: login');
