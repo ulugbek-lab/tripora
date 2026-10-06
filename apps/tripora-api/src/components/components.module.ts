@@ -1,3 +1,4 @@
+import { TravelAiModule } from './travel-ai/travel-ai.module';
 import { Module } from '@nestjs/common';
 import { MemberModule } from './member/member.module';
 import { TravelPackageModule } from './travel-package/travel-package.module';
@@ -10,6 +11,7 @@ import { BoardArticleModule } from './board-article/board-article.module';
 
 @Module({
 	imports: [
+		TravelAiModule,
 		MemberModule,
 		AuthModule,
 		TravelPackageModule,
