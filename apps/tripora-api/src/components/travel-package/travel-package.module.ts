@@ -1,3 +1,4 @@
+import { PackageImageService } from './package-image.service';
 import { RateLimitModule } from '../../libs/rate-limit';
 import { Module } from '@nestjs/common';
 import { TravelPackageResolver } from './travel-package.resolver';
@@ -18,7 +19,7 @@ import { LikeModule } from '../like/like.module';
 		MemberModule,
 		LikeModule,
 	],
-	providers: [TravelPackageResolver, TravelPackageService],
+	providers: [TravelPackageResolver, TravelPackageService, PackageImageService],
 	exports: [TravelPackageService],
 })
 export class TravelPackageModule {}

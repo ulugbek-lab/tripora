@@ -1,3 +1,5 @@
+import { GraphQLUpload, FileUpload } from 'graphql-upload';
+import { PackageImageService } from './package-image.service';
 import { OperationRateLimitGuard } from '../../libs/rate-limit';
 import { Args, Mutation, Query, Resolver } from '@nestjs/graphql';
 import { TravelPackageService } from './travel-package.service';
@@ -9,7 +11,7 @@ import {
 	TravelPackagesInquiry,
 	TravelPackageInput,
 } from '../../libs/dto/travel-package/travel-package.input';
-import { UseGuards } from '@nestjs/common';
+import { BadRequestException, Optional, ServiceUnavailableException, UseGuards } from '@nestjs/common';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { MemberType } from '../../libs/enums/member.enum';
@@ -23,7 +25,20 @@ import { AuthGuard } from '../auth/guards/auth.guard';
 
 @Resolver()
 export class TravelPackageResolver {
-	constructor(private readonly travelPackageService: TravelPackageService) {}
+	constructor(
+		private readonly travelPackageService: TravelPackageService,
+		@Optional() private readonly packageImageService?: PackageImageService,
+	) {}
+
+	@Roles(MemberType.AGENT)
+	@UseGuards(RolesGuard)
+	@Mutation(() => [String])
+	async uploadTravelPackageImages(
+		@Args('files', { type: () => [GraphQLUpload] }) files: Promise<FileUpload>[],
+	): Promise<string[]> {
+		if (!this.packageImageService) throw new ServiceUnavailableException('Package image uploads are not configured');
+		return this.packageImageService.upload(files);
+	}
 
 	//AGENT
 	@Roles(MemberType.AGENT)
@@ -32,7 +47,13 @@ export class TravelPackageResolver {
 	public async createTravelPackage(
 		@Args('input') input: TravelPackageInput,
 		@AuthMember('_id') memberId: mongoose.Types.ObjectId,
+		@Args('files', { type: () => [GraphQLUpload], nullable: true }) files?: Promise<FileUpload>[],
 	): Promise<TravelPackage> {
+		if (files) {
+			if (!this.packageImageService) throw new ServiceUnavailableException('Package image uploads are not configured');
+			input.packageImages = await this.packageImageService.upload(files);
+		}
+		if (!input.packageImages?.length) throw new BadRequestException('At least one package image is required');
 		return await this.travelPackageService.createTravelPackage(memberId, input);
 	}
 
@@ -43,8 +64,14 @@ export class TravelPackageResolver {
 	public async updateTravelPackage(
 		@Args('input') input: TravelPackageUpdate,
 		@AuthMember('_id') memberId: Types.ObjectId,
+		@Args('files', { type: () => [GraphQLUpload], nullable: true }) files?: Promise<FileUpload>[],
 	): Promise<TravelPackage> {
 		input._id = shapeIntoMongoObjectId(input._id);
+		if (files) {
+			await this.travelPackageService.assertOwnedTravelPackage(memberId, input._id);
+			if (!this.packageImageService) throw new ServiceUnavailableException('Package image uploads are not configured');
+			input.packageImages = await this.packageImageService.upload(files);
+		}
 		return await this.travelPackageService.updateTravelPackage(memberId, input);
 	}
 

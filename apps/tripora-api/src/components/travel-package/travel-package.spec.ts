@@ -62,6 +62,10 @@ describe('TravelPackage contract', () => {
 			expect(schema.getType('TravelPackage')).toBeDefined();
 			expect(schema.getType('Property')).toBeUndefined();
 			expect(schema.getMutationType()?.getFields().createTravelPackage).toBeDefined();
+			expect(schema.getMutationType()?.getFields().uploadTravelPackageImages.type.toString()).toBe('[String!]!');
+			const mutations = schema.getMutationType()!.getFields();
+			expect(mutations.createTravelPackage.args.find((arg) => arg.name === 'files')?.type.toString()).toBe('[Upload!]');
+			expect(mutations.updateTravelPackage.args.find((arg) => arg.name === 'files')?.type.toString()).toBe('[Upload!]');
 			expect(schema.getQueryType()?.getFields().getTravelPackages).toBeDefined();
 			expect(schema.getQueryType()?.getFields().getFavoriteTravelPackages).toBeDefined();
 			expect(schema.getQueryType()?.getFields().getVisitedTravelPackages).toBeDefined();

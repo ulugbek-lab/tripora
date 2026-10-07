@@ -346,6 +346,14 @@ export class TravelPackageService {
 		return result;
 	}
 
+	public async assertOwnedTravelPackage(memberId: Types.ObjectId, packageId: Types.ObjectId): Promise<void> {
+		if (!memberId) throw new BadRequestException(Message.NOT_ALLOWED_REQUEST);
+		const target = await this.travelPackageModel
+			.findOne({ _id: packageId, memberId, packageStatus: { $ne: TravelPackageStatus.DELETE } })
+			.exec();
+		if (!target) throw new BadRequestException(Message.NOT_ALLOWED_REQUEST);
+	}
+
 	public async assertAccessibleTravelPackage(packageId: Types.ObjectId): Promise<void> {
 		const target = await this.travelPackageModel
 			.findOne({ _id: packageId, packageStatus: TravelPackageStatus.ACTIVE })

@@ -35,12 +35,13 @@ export class TravelPackageInput {
 	@IsInt() @Min(1) @Field(() => Int) packageDurationDays: number;
 	@IsInt() @Min(1) @Field(() => Int) packageMaxTravellers: number;
 	@IsInt() @Min(0) @Field(() => Int) packageAvailableSlots: number;
+	@IsOptional()
 	@IsArray()
 	@ArrayMinSize(1)
 	@IsString({ each: true })
 	@IsNotEmpty({ each: true })
-	@Field(() => [String])
-	packageImages: string[];
+	@Field(() => [String], { nullable: true })
+	packageImages?: string[];
 	@IsOptional() @IsString() @Field(() => String, { nullable: true }) packageDesc?: string;
 	@IsDate() @Type(() => Date) @Field(() => Date) packageStartDate: Date;
 }

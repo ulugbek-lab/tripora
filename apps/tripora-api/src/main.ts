@@ -11,7 +11,7 @@ async function bootstrap() {
 	app.useGlobalPipes(new ValidationPipe());
 	app.useGlobalInterceptors(new LoggingInterceptor());
 	app.enableCors({ origin: true, credentials: true }); //cors integration
-	app.use(graphqlUploadExpress({ maxFile: 10 })); //file upload
+	app.use(graphqlUploadExpress({ maxFiles: 10 })); //file upload
 	app.use('/uploads', express.static('./uploads'));
 
 	app.useWebSocketAdapter(new WsAdapter(app));
