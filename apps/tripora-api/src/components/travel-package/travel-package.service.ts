@@ -231,6 +231,7 @@ export class TravelPackageService {
 			countryList,
 			cityList,
 			typeList,
+			packageCurrency,
 			priceRange,
 			durationRange,
 			maxTravellersRange,
@@ -241,6 +242,7 @@ export class TravelPackageService {
 		if (countryList?.length) match.packageCountry = { $in: countryList };
 		if (cityList?.length) match.packageCity = { $in: cityList };
 		if (typeList?.length) match.packageType = { $in: typeList };
+		if (packageCurrency) match.packageCurrency = packageCurrency;
 		if (priceRange) match.packagePrice = { $gte: priceRange.start, $lte: priceRange.end };
 		for (const range of [priceRange, durationRange, maxTravellersRange, startDateRange]) {
 			if (range && range.start > range.end) throw new BadRequestException(Message.BAD_REQUEST);

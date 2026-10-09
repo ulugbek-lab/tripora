@@ -3,7 +3,7 @@ import { Mutation, Resolver, Query, Args } from '@nestjs/graphql';
 import { MemberService } from './member.service';
 import { AgentsInquiry, LoginInput, MemberInput, MembersInquiry } from '../../libs/dto/member/member.input';
 import { Member, Members } from '../../libs/dto/member/member';
-import { UseGuards } from '@nestjs/common';
+import { BadRequestException, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '../auth/guards/auth.guard';
 import { AuthMember } from '../auth/decorators/authMember.decorator';
 import { Types } from 'mongoose';
@@ -121,6 +121,7 @@ export class MemberResolver {
 		{ createReadStream, filename, mimetype }: FileUpload,
 		@Args('target') target: String,
 	): Promise<string> {
+		if (!['member', 'article'].includes(String(target))) throw new BadRequestException('Invalid image target');
 		console.log('Mutation: imageUploader');
 
 		if (!filename) throw new Error(Message.UPLOAD_FAILED);
@@ -153,6 +154,7 @@ export class MemberResolver {
 		files: Promise<FileUpload>[],
 		@Args('target') target: String,
 	): Promise<string[]> {
+		if (!['member', 'article'].includes(String(target))) throw new BadRequestException('Invalid image target');
 		console.log('Mutation: imagesUploader');
 
 		const uploadedImages: string[] = [];

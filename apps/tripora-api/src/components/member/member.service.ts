@@ -26,6 +26,7 @@ export class MemberService {
 		private likeService: LikeService,
 	) {}
 	public async signup(input: MemberInput): Promise<Member> {
+		if (input.memberType === MemberType.ADMIN) throw new BadRequestException(Message.NOT_ALLOWED_REQUEST);
 		//TODO Hash password
 		input.memberPassword = await this.authService.hashPassword(input.memberPassword);
 		try {
@@ -58,14 +59,19 @@ export class MemberService {
 		return response;
 	}
 	public async updateMember(memberId: Types.ObjectId, input: MemberUpdate): Promise<Member> {
+		if (input.memberType !== undefined || input.memberStatus !== undefined)
+			throw new BadRequestException(Message.NOT_ALLOWED_REQUEST);
+		const { _id, memberType, memberStatus, deletedAt, ...changes } = input;
+		if (changes.memberPassword !== undefined)
+			changes.memberPassword = await this.authService.hashPassword(changes.memberPassword);
 		const result = await this.memberModel
 			.findOneAndUpdate(
 				{
 					_id: memberId,
 					memberStatus: MemberStatus.ACTIVE,
 				},
-				input,
-				{ new: true },
+				{ $set: changes },
+				{ new: true, runValidators: true },
 			)
 			.exec();
 		if (!result) throw new InternalServerErrorException(Message.UPDATE_FAILED);
@@ -85,7 +91,7 @@ export class MemberService {
 			const viewInput = { memberId: memberId, viewRefId: targetId, viewGroup: ViewGroup.MEMBER };
 			const newView = await this.viewService.recordView(viewInput);
 			if (newView) {
-				await this.memberModel.findByIdAndUpdate(search, { $inc: { memberViews: 1 } }, { new: true }).exec();
+				await this.memberModel.findOneAndUpdate(search, { $inc: { memberViews: 1 } }, { new: true }).exec();
 				targetMember.memberViews++;
 			}
 
@@ -177,7 +183,14 @@ export class MemberService {
 	}
 
 	public async updateMemberByAdmin(input: MemberUpdate): Promise<Member> {
-		const result = await this.memberModel.findOneAndUpdate({ _id: input._id }, input, { new: true });
+		const { _id, ...changes } = input;
+		if (changes.memberPassword !== undefined)
+			changes.memberPassword = await this.authService.hashPassword(changes.memberPassword);
+		const result = await this.memberModel.findOneAndUpdate(
+			{ _id },
+			{ $set: changes },
+			{ new: true, runValidators: true },
+		);
 		if (!result) throw new InternalServerErrorException(Message.UPDATE_FAILED);
 
 		return result;

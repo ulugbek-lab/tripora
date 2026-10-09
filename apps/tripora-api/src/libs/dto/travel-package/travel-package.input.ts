@@ -103,6 +103,11 @@ class TravelPackageSearch {
 	typeList?: TravelPackageType[];
 
 	@IsOptional()
+	@IsIn(packageCurrencies)
+	@Field(() => String, { nullable: true })
+	packageCurrency?: string;
+
+	@IsOptional()
 	@ValidateNested()
 	@Type(() => PriceRange)
 	@Field(() => PriceRange, { nullable: true })

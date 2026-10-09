@@ -1,4 +1,7 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { InjectModel } from '@nestjs/mongoose';
+import { Model } from 'mongoose';
+import { MemberStatus } from '../../libs/enums/member.enum';
 import * as bcrypt from 'bcryptjs';
 import { Member } from '../../libs/dto/member/member';
 import { T } from '../../libs/types/common';
@@ -7,7 +10,10 @@ import { shapeIntoMongoObjectId } from '../../libs/config';
 
 @Injectable()
 export class AuthService {
-	constructor(private jwtService: JwtService) {}
+	constructor(
+		private jwtService: JwtService,
+		@InjectModel('Member') private readonly memberModel: Model<Member>,
+	) {}
 	public async hashPassword(memberPassword: string): Promise<string> {
 		const salt = await bcrypt.genSalt();
 		return await bcrypt.hash(memberPassword, salt);
@@ -17,7 +23,6 @@ export class AuthService {
 	}
 
 	public async createToken(member: Member): Promise<string> {
-		console.log(member);
 		const payload: T = {};
 		Object.keys(member['_doc'] ? member['_doc'] : member).map((ele) => {
 			payload[`${ele}`] = member[`${ele}`];
@@ -27,9 +32,12 @@ export class AuthService {
 	}
 
 	public async verifyToken(token: string): Promise<Member> {
-		const member = await this.jwtService.verifyAsync(token);
-		member._id = shapeIntoMongoObjectId(member._id);
-
+		const claims = await this.jwtService.verifyAsync(token);
+		const member = await this.memberModel
+			.findOne({ _id: shapeIntoMongoObjectId(claims._id), memberStatus: MemberStatus.ACTIVE })
+			.lean<Member>()
+			.exec();
+		if (!member) throw new UnauthorizedException('Member session is no longer active');
 		return member;
 	}
 }

@@ -202,7 +202,7 @@ export class TravelAiService {
 				},
 				{
 					headers: { Authorization: `Bearer ${apiKey}` },
-					timeout: 30000,
+					timeout: 50000,
 					maxContentLength: 1024 * 1024,
 					maxBodyLength: 64 * 1024,
 				},
@@ -229,6 +229,10 @@ export class TravelAiService {
 	}
 
 	private handleProviderError(error: unknown): never {
+		if (isAxiosError(error)) {
+			console.error('OpenAI status:', error.response?.status);
+			console.error('OpenAI error:', error.response?.data);
+		}
 		if (error instanceof BadGatewayException) {
 			this.logger.warn('AI provider returned an unusable response');
 			throw error;
