@@ -18,6 +18,7 @@ import { SocketModule } from './socket/socket.module';
 			playground: true,
 			uploads: false,
 			autoSchemaFile: true,
+			context: ({ req, res }) => ({ req, res }),
 			formatError: (error: T) => {
 				const graphQLFormattedError = {
 					code: error?.extensions.code,
@@ -29,7 +30,8 @@ import { SocketModule } from './socket/socket.module';
 			},
 		}),
 		ComponentsModule, // Components
-		DatabaseModule, SocketModule, //db TCP
+		DatabaseModule,
+		SocketModule, //db TCP
 	],
 	controllers: [AppController],
 	providers: [AppService, AppResolver],

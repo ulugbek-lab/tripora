@@ -1,3 +1,4 @@
+import type { Response } from 'express';
 import { BadRequestException, Injectable, InternalServerErrorException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -25,7 +26,7 @@ export class MemberService {
 		private viewService: ViewService,
 		private likeService: LikeService,
 	) {}
-	public async signup(input: MemberInput): Promise<Member> {
+	public async signup(input: MemberInput, response?: Response): Promise<Member> {
 		if (input.memberType === MemberType.ADMIN) throw new BadRequestException(Message.NOT_ALLOWED_REQUEST);
 		//TODO Hash password
 		input.memberPassword = await this.authService.hashPassword(input.memberPassword);
@@ -33,13 +34,14 @@ export class MemberService {
 			const result = await this.memberModel.create(input);
 			//TODO Auth via token
 			result.accessToken = await this.authService.createToken(result);
+			if (response) await this.authService.createRefreshToken(result, response);
 			return result;
 		} catch (err) {
 			console.log('Error, Service.model:', (err as T).message);
 			throw new BadRequestException(Message.USED_MEMBER_NICK_OR_PHONE);
 		}
 	}
-	public async login(input: LoginInput): Promise<Member> {
+	public async login(input: LoginInput, httpResponse?: Response): Promise<Member> {
 		const { memberNick, memberPassword } = input;
 		const response: Member | null = await this.memberModel
 			.findOne({ memberNick: memberNick })
@@ -56,6 +58,7 @@ export class MemberService {
 		const isMatch = await this.authService.comparePassword(input.memberPassword, response.memberPassword);
 		if (!isMatch) throw new InternalServerErrorException(Message.WRONG_PASSWORD);
 		response.accessToken = await this.authService.createToken(response);
+		if (httpResponse) await this.authService.createRefreshToken(response, httpResponse);
 		return response;
 	}
 	public async updateMember(memberId: Types.ObjectId, input: MemberUpdate): Promise<Member> {

@@ -1,5 +1,6 @@
+import type { Response } from 'express';
 import { OperationRateLimitGuard } from '../../libs/rate-limit';
-import { Mutation, Resolver, Query, Args } from '@nestjs/graphql';
+import { Mutation, Resolver, Query, Args, Context } from '@nestjs/graphql';
 import { MemberService } from './member.service';
 import { AgentsInquiry, LoginInput, MemberInput, MembersInquiry } from '../../libs/dto/member/member.input';
 import { Member, Members } from '../../libs/dto/member/member';
@@ -24,15 +25,15 @@ export class MemberResolver {
 
 	@UseGuards(OperationRateLimitGuard)
 	@Mutation(() => Member)
-	public async signup(@Args('input') input: MemberInput): Promise<Member> {
+	public async signup(@Args('input') input: MemberInput, @Context() context: { res: Response }): Promise<Member> {
 		console.log('Mutation: signup');
-		return await this.memberService.signup(input);
+		return await this.memberService.signup(input, context.res);
 	}
 	@UseGuards(OperationRateLimitGuard)
 	@Mutation(() => Member)
-	public async login(@Args('input') input: LoginInput): Promise<Member> {
+	public async login(@Args('input') input: LoginInput, @Context() context: { res: Response }): Promise<Member> {
 		console.log('Mutation: login');
-		return await this.memberService.login(input);
+		return await this.memberService.login(input, context.res);
 	}
 	@UseGuards(AuthGuard)
 	@Query(() => String)
