@@ -59,7 +59,11 @@ export class BoardArticleService {
 				targetBoardArticle.articleViews++;
 			}
 
-			//me liked
+			targetBoardArticle.meLiked = await this.likeService.checkLikeExistance({
+				memberId,
+				likeRefId: articleId,
+				likeGroup: LikeGroup.ARTICLE,
+			});
 		}
 		targetBoardArticle.memberData = await this.memberService.getMember(null, targetBoardArticle.memberId);
 		return targetBoardArticle;
@@ -201,7 +205,7 @@ export class BoardArticleService {
 
 	public async removeBoardArticleByAdmin(articleId: Types.ObjectId): Promise<BoardArticle> {
 		const search: T = { _id: articleId, articleStatus: BoardArticleStatus.DELETE };
-		const result = await this.boardArticleModel.findByIdAndDelete(search).exec();
+		const result = await this.boardArticleModel.findOneAndDelete(search).exec();
 		if (!result) throw new InternalServerErrorException(Message.REMOVE_FAILED);
 
 		return result;
