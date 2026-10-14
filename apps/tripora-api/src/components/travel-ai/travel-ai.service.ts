@@ -202,7 +202,7 @@ export class TravelAiService {
 				},
 				{
 					headers: { Authorization: `Bearer ${apiKey}` },
-					timeout: 50000,
+					timeout: 100000,
 					maxContentLength: 1024 * 1024,
 					maxBodyLength: 64 * 1024,
 				},
